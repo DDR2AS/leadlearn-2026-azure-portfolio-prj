@@ -19,14 +19,24 @@ if [[ -z "$APP_ID" ]]; then
 fi
 SP_ID="$(az ad sp show --id "$APP_ID" --query id -o tsv)"
 
-if [[ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?name=='main'].name" -o tsv)" ]]; then
-  az ad app federated-credential create --id "$APP_ID" --output none --parameters "{
-    \"name\": \"main\",
-    \"issuer\": \"https://token.actions.githubusercontent.com\",
-    \"subject\": \"repo:$REPO:ref:refs/heads/main\",
-    \"audiences\": [\"api://AzureADTokenExchange\"]
-  }"
-fi
+# GitHub puede enviar el subject con los IDs numéricos del dueño y del repo
+# (repo:usuario@123/repo@456:...), así que se registran ambos formatos.
+IDS="$(curl -s "https://api.github.com/repos/$REPO" | grep -oE '"id": [0-9]+' | head -2 | grep -oE '[0-9]+' | tr '\n' ' ')"
+read -r REPO_NUM OWNER_NUM <<< "$IDS"
+SUBJECTS=("main=repo:$REPO:ref:refs/heads/main")
+[[ -n "$OWNER_NUM" ]] && SUBJECTS+=("main-ids=repo:${REPO%%/*}@$OWNER_NUM/${REPO##*/}@$REPO_NUM:ref:refs/heads/main")
+
+for entry in "${SUBJECTS[@]}"; do
+  name="${entry%%=*}"; subject="${entry#*=}"
+  if [[ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?name=='$name'].name" -o tsv)" ]]; then
+    az ad app federated-credential create --id "$APP_ID" --output none --parameters "{
+      \"name\": \"$name\",
+      \"issuer\": \"https://token.actions.githubusercontent.com\",
+      \"subject\": \"$subject\",
+      \"audiences\": [\"api://AzureADTokenExchange\"]
+    }"
+  fi
+done
 
 # Solo sobre el resource group del proyecto. RBAC Administrator es necesario porque el Bicep crea role assignments.
 for role in "Contributor" "Role Based Access Control Administrator"; do
