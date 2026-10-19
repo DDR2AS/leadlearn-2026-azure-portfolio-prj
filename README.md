@@ -12,38 +12,47 @@ Pipeline de ingesta diaria en Azure: se creó un contenedor que genera data fake
 
 **Flujo:** el job se ejecuta cada día (o a demanda con una fecha) → obtiene la API key desde Key Vault → extrae las conversaciones → sube `raw/conversations/fecha=YYYY-MM-DD/conversations_YYYY-MM-DD.csv` → un *Storage Event Trigger* lanza el pipeline de Data Factory → escribe el Parquet con tipos en `processed/`. Si la conversión falla, Data Factory lee la URL de la Logic App desde Key Vault y envía un correo de alerta.
 
-## Probar rápido - Generador de conversaciones random
+## El pipeline en acción
 
-### En local
+### 1. Despliegue
 
-```bash
-python -m venv .venv
-source .venv/Scripts/activate        # Windows (Git Bash) · en PowerShell: .\.venv\Scripts\Activate.ps1
-pip install -r conversation-generator-bb/requirements.txt
+Toda la infraestructura se crea con Bicep desde GitHub Actions (login por OIDC, sin contraseñas).
 
-cd conversation-generator-bb
-export SOURCE_API_KEY=mi-clave-de-prueba-123      # PowerShell: $env:SOURCE_API_KEY = "mi-clave-de-prueba-123"
-python -m extractor --date 2026-10-05 --count 10 --output local --local-dir ../output
-```
+![Workflow de deploy en GitHub Actions](resources/screenshots/01-github-actions-deploy.png)
 
-Resultado: `output/raw/conversations/fecha=2026-10-05/conversations_2026-10-05.csv`
+![Recursos del resource group con sus tags](resources/screenshots/02-resource-group.png)
 
-### En local : Docker
+### 2. Extracción (Container Apps Job)
 
-```powershell
-# PowerShell, con Docker Desktop ejecutándose
-cd conversation-generator-bb
-docker build -t extractor .
-docker run --rm -e SOURCE_API_KEY=mi-clave-de-prueba-123 -v "${PWD}\..\output:/app/output" `
-  extractor --date 2026-10-05 --count 10 --output local
-```
+El job se lanza para una fecha y Azure levanta el contenedor, ejecuta el extractor y lo apaga.
 
-### En Azure
+![Ejecución del job desde la CLI](resources/screenshots/03-job-ejecucion-cli.png)
 
-```bash
-./scripts/run-job.sh 2026-10-05 500      # lanza el job para esa fecha
-./scripts/show-lake.sh                   # en 1–2 min: CSV en raw/ y Parquet en processed/
-```
+![Logs del extractor](resources/screenshots/04-job-logs.png)
+
+### 3. Capa raw (CSV)
+
+El CSV queda particionado por fecha: `raw/conversations/fecha=YYYY-MM-DD/`.
+
+![CSV en el contenedor raw](resources/screenshots/05-raw-csv.png)
+
+### 4. Data Factory (CSV → Parquet)
+
+El evento *BlobCreated* dispara el pipeline `PL_Conversations`.
+
+![Pipeline en Data Factory Studio](resources/screenshots/06-adf-pipeline.png)
+
+![Ejecución exitosa en el monitor de Data Factory](resources/screenshots/07-adf-monitor.png)
+
+### 5. Capa processed (Parquet)
+
+![Parquet en el contenedor processed](resources/screenshots/08-processed-parquet.png)
+
+### 6. Seguridad y costos
+
+![Roles RBAC de las Managed Identities](resources/screenshots/09-roles-rbac.png)
+
+![Budget en Cost Management](resources/screenshots/10-budget.png)
 
 ## Servicios
 
@@ -70,12 +79,43 @@ docker run --rm -e SOURCE_API_KEY=mi-clave-de-prueba-123 -v "${PWD}\..\output:/a
 │   └── modules/            storage · keyvault · registry · containerapps · datafactory · logicapp · roles · budget
 ├── scripts/                deploy · run-job · show-lake · cleanup · setup-github-oidc
 ├── .github/workflows/      ci.yml (PR) · deploy.yml (push a main)
-├── resources/              Diagrama de arquitectura
+├── resources/              Diagrama de arquitectura y capturas (screenshots/)
 └── bicepconfig.json        Reglas del linter
 ```
 
+## Probar rápido - Generador de conversaciones random
+
+### En local
+
+```bash
+python -m venv .venv
+source .venv/Scripts/activate        # Windows (Git Bash) · en PowerShell: .\.venv\Scripts\Activate.ps1
+pip install -r conversation-generator-bb/requirements.txt
+
+cd conversation-generator-bb
+export SOURCE_API_KEY=mi-clave-de-prueba-123      # PowerShell: $env:SOURCE_API_KEY = "mi-clave-de-prueba-123"
+python -m extractor --date 2026-10-05 --count 10 --output local --local-dir ../output
+```
+
+Resultado: `output/raw/conversations/fecha=2026-10-05/conversations_2026-10-05.csv`
+
+### En Azure
+
+```bash
+./scripts/run-job.sh 2026-10-05 500      # lanza el job para esa fecha
+./scripts/show-lake.sh                   # en 1–2 min: CSV en raw/ y Parquet en processed/
+```
+
+
 ## Despliegue
-Para ejecutar este proyecto, se requiere, azure cli para ejecutar los comandos de terminal (obvio). y la extensión container app. y varias extensiones
+
+Para ejecutar este proyecto se requiere:
+
+- Una suscripción de Azure con rol **Owner** (el Bicep crea asignaciones de roles).
+- **Azure CLI** con Bicep y la extensión `containerapp` (`az extension add --name containerapp`).
+- **Git Bash** en Windows para los scripts `.sh`.
+- No hace falta Docker local: la imagen se construye en ACR con `az acr build`.
+
 ### 1. Registrar los proveedores (una vez por suscripción)
 
 ```bash
@@ -114,7 +154,7 @@ La misma fecha siempre genera los mismos datos y sobrescribe sus archivos: repet
 ./scripts/setup-github-oidc.sh <usuario>/<repo>
 ```
 
-Crea una app registration con *federated credential* para la rama `main` (sin secretos) y le asigna **Contributor** y **Role Based Access Control Administrator** solo sobre el resource group. Copia los valores que imprime en *Settings → Secrets and variables → Actions → Variables*.
+Crea una app registration con *federated credentials* para la rama `main` (sin secretos; registra el subject con y sin los IDs numéricos que GitHub puede enviar) y le asigna **Contributor** y **Role Based Access Control Administrator** solo sobre el resource group. Copia los valores que imprime en *Settings → Secrets and variables → Actions → Variables*.
 
 | Workflow | Cuándo | Qué hace |
 |----------|--------|----------|

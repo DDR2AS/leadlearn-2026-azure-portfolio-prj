@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("azure").setLevel(logging.WARNING)  # oculta el detalle HTTP del SDK de Azure
     args = build_parser().parse_args(argv)
     day = args.date or (datetime.now(timezone.utc).date() - timedelta(days=1))
 
