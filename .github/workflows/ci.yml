@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Tests del extractor
+        working-directory: conversation-generator-bb
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q
+
+      - name: Lint de Bicep
+        run: |
+          az bicep install
+          az bicep lint --file infra/main.bicep
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Build de la imagen
+        run: docker build -t extractor:ci conversation-generator-bb
