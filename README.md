@@ -3,7 +3,10 @@
 Pipeline de ingesta diaria en Azure: se creó un contenedor que genera data faker sobre conversaciones de atención al cliente de un sistema origen (un software simulado, se asume que existiera), las deja como **CSV** en un **Data Lake** en la capa raw y **Data Factory** las convierte automáticamente a **Parquet**. Se usa (**Bicep**) para definir toda la infraestructura, se despliega con **GitHub Actions** y ningún componente usa contraseñas: los accesos se resuelven con **Managed Identity** y **RBAC**.
 
 - Además se creó la suscripción usando un budget alert.
-
+- Usaré key vault para no manejar contraseñas de manera pública.
+- Para no esperar que se ejecute una vez por dia, bueno se puede correr manualmente el script con fecha de input en el generador de conversaciones, ver readme de extractor.
+- El proyecto estará en la nube durante 1 sem y después eliminaré la suscripción.
+- Con data factory se trato de simular una conversión a parquet como parte de una normalización de rutina que tendría un software de chats conversacionales masivo para reducir espacio, formatear, etc. para que se consuma por otro pipeline. En mi experiencia ahí ya entraría hacer arquitectura medallion, masomenos lo que implementamos aquí : raw y staging. Me resultó interesante ya que intente asi implementar en azure y descargar los bicep, pero generaba mucho código, y recorde una sesión que nos recomendaron no hacerlo. 
 > Proyecto final del bootcamp de Azure (UTP). El sistema origen se simula con datos ficticios.
 
 ## Arquitectura
@@ -187,8 +190,3 @@ Borra el resource group y purga el Key Vault (soft delete) para poder volver a d
 - ACR sin usuario admin, Storage sin acceso público y TLS 1.2 mínimo.
 
 Un **budget** de 9 USD avisa por correo al 80 % y al 100 %. Para minimizar costos: desplegar, probar y ejecutar `cleanup.sh`; Bicep permite recrear todo en minutos.
-
-## Mejoras para producción
-
-- Condición en el rol *RBAC Administrator* de GitHub para que solo pueda asignar los roles del proyecto.
-- Reemplazar el simulador por el cliente real del sistema origen: el resto del pipeline no cambia.
